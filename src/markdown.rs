@@ -4,10 +4,34 @@ enum MarkdownError {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+enum HeaderLevel {
+    One,
+    Two,
+    Three,
+    Four,
+    Five,
+    Six,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum TextStyle {
+    Normal,
+    Italic,
+    Bold,
+    BoldItalic,
+}
+
+#[derive(Debug, PartialEq, Eq)]
 enum MarkdownToken {
-    Header1(String),
+    Header(HeaderLevel, TextToken),
     NewLine,
-    Text(String),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct TextToken {
+    style: TextStyle,
+    text: String,
+    children: Vec<TextToken>,
 }
 
 struct MarkdownParser {
@@ -19,10 +43,7 @@ impl MarkdownParser {
     pub fn new(input: &str) -> Self {
         let chars: Vec<char> = input.chars().collect();
 
-        Self {
-            offset: 0,
-            chars,
-        }
+        Self { offset: 0, chars }
     }
 
     pub fn parse(&mut self) -> Result<Vec<MarkdownToken>, MarkdownError> {
@@ -69,7 +90,14 @@ impl MarkdownParser {
             if ch == '\n' {
                 let header_text: String = header_chars.into_iter().collect();
 
-                return Ok(MarkdownToken::Header1(header_text));
+                return Ok(MarkdownToken::Header(
+                    HeaderLevel::One,
+                    TextToken {
+                        style: TextStyle::Normal,
+                        text: header_text,
+                        children: Vec::new(),
+                    },
+                ));
             }
 
             header_chars.push(ch);
@@ -78,7 +106,14 @@ impl MarkdownParser {
 
         let header_text: String = header_chars.into_iter().collect();
 
-        Ok(MarkdownToken::Header1(header_text))
+        Ok(MarkdownToken::Header(
+            HeaderLevel::One,
+            TextToken {
+                style: TextStyle::Normal,
+                text: header_text,
+                children: Vec::new(),
+            },
+        ))
     }
 
     fn parse_new_line(&mut self) -> MarkdownToken {
@@ -86,7 +121,6 @@ impl MarkdownParser {
 
         MarkdownToken::NewLine
     }
-
 }
 
 #[cfg(test)]
@@ -103,7 +137,14 @@ mod tests {
 
         assert_eq!(
             result,
-            vec![MarkdownToken::Header1("Hello World!".to_string())]
+            vec![MarkdownToken::Header(
+                HeaderLevel::One,
+                TextToken {
+                    style: TextStyle::Normal,
+                    text: "Hello World!".to_string(),
+                    children: Vec::new()
+                }
+            )]
         );
     }
 
@@ -117,7 +158,14 @@ mod tests {
         assert_eq!(
             result,
             vec![
-                MarkdownToken::Header1("Hello World!".to_string()),
+                MarkdownToken::Header(
+                    HeaderLevel::One,
+                    TextToken {
+                        style: TextStyle::Normal,
+                        text: "Hello World!".to_string(),
+                        children: Vec::new()
+                    }
+                ),
                 MarkdownToken::NewLine
             ]
         );
