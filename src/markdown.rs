@@ -63,8 +63,12 @@ impl MarkdownParser {
     }
 
     fn parse_header_or_text(&mut self) -> MarkdownToken {
-        // Increase offset so that we can switch to the next character
-        self.offset += 1;
+        // Figure out the level of the header (should be between 1 and 6)
+        let mut header_ch_count = 0;
+        while self.offset < self.chars_len && self.chars[self.offset] == '#' {
+            header_ch_count += 1;
+            self.offset += 1;
+        }
 
         if self.offset == self.chars_len {
             return MarkdownToken::Paragraph(vec![]);
@@ -74,16 +78,27 @@ impl MarkdownParser {
 
         if current_ch == ' ' {
             self.offset += 1;
-            self.parse_header()
+
+            let header_level = match header_ch_count {
+                1 => HeaderLevel::One,
+                2 => HeaderLevel::Two,
+                3 => HeaderLevel::Three,
+                4 => HeaderLevel::Four,
+                5 => HeaderLevel::Five,
+                6 => HeaderLevel::Six,
+                _ => HeaderLevel::Six,
+            };
+
+            self.parse_header(header_level)
         } else {
             todo!("Text parsing will be done later")
         }
     }
 
-    fn parse_header(&mut self) -> MarkdownToken {
+    fn parse_header(&mut self, header_level: HeaderLevel) -> MarkdownToken {
         let text_tokens = self.parse_text_tokens();
 
-        MarkdownToken::Header(HeaderLevel::One, text_tokens)
+        MarkdownToken::Header(header_level, text_tokens)
     }
 
     fn parse_text_tokens(&mut self) -> Vec<TextToken> {
@@ -358,7 +373,7 @@ mod tests {
 
     #[test]
     fn parse_header_1_with_newline() {
-        let input = "# Hello World!\n";
+        let input = "# Hello World!\n\n";
 
         let mut markdown_parser = MarkdownParser::new(input);
         let result = markdown_parser.parse();
@@ -370,8 +385,27 @@ mod tests {
                     HeaderLevel::One,
                     vec![TextToken::Text("Hello World!".to_string())]
                 ),
+                MarkdownToken::NewLine,
                 MarkdownToken::NewLine
             ]
+        );
+    }
+
+    #[test]
+    fn parse_header_2() {
+        let input = "## **Hello World!**";
+
+        let mut markdown_parser = MarkdownParser::new(input);
+        let result = markdown_parser.parse();
+
+        assert_eq!(
+            result,
+            vec![MarkdownToken::Header(
+                HeaderLevel::Two,
+                vec![TextToken::Bold(vec![TextToken::Text(
+                    "Hello World!".to_string()
+                )])]
+            )]
         );
     }
 }
