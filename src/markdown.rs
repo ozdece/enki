@@ -85,7 +85,6 @@ impl MarkdownParser {
                 3 => HeaderLevel::Three,
                 4 => HeaderLevel::Four,
                 5 => HeaderLevel::Five,
-                6 => HeaderLevel::Six,
                 _ => HeaderLevel::Six,
             };
 
