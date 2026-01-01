@@ -54,7 +54,7 @@ impl MarkdownParser {
                 '#' => result.push(self.parse_header_or_text()),
                 '\n' => result.push(self.parse_new_line()),
                 // Parse the rest of the characters as paragraphs
-                _ => result.push(self.parse_paragraph())
+                _ => result.push(self.parse_paragraph()),
             }
         }
 
@@ -424,9 +424,25 @@ mod tests {
 
         assert_eq!(
             result,
-            vec![MarkdownToken::Paragraph(
-                vec![TextToken::Text("Hello World".to_string())]
-            )]
+            vec![MarkdownToken::Paragraph(vec![TextToken::Text(
+                "Hello World".to_string()
+            )])]
+        );
+    }
+
+    #[test]
+    fn parse_unclosed_styled_paragraph() {
+        let input = "Hello *World";
+
+        let mut markdown_parser = MarkdownParser::new(input);
+        let result = markdown_parser.parse();
+
+        assert_eq!(
+            result,
+            vec![MarkdownToken::Paragraph(vec![
+                TextToken::Text("Hello ".to_string()),
+                TextToken::Italic(vec![TextToken::Text("World".to_string())])
+            ])]
         );
     }
 
@@ -439,16 +455,14 @@ mod tests {
 
         assert_eq!(
             result,
-            vec![MarkdownToken::Paragraph(
-                vec![
-                    TextToken::Text("Hello ".to_string()),
-                    TextToken::Italic(vec![
-                        TextToken::Text("World ".to_string()),
-                        TextToken::Bold(vec![TextToken::Text("123".to_string())])
-                    ]),
-                    TextToken::Text("!".to_string())
-                ]
-            )]
+            vec![MarkdownToken::Paragraph(vec![
+                TextToken::Text("Hello ".to_string()),
+                TextToken::Italic(vec![
+                    TextToken::Text("World ".to_string()),
+                    TextToken::Bold(vec![TextToken::Text("123".to_string())])
+                ]),
+                TextToken::Text("!".to_string())
+            ])]
         );
     }
 }
