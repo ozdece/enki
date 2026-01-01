@@ -53,7 +53,8 @@ impl MarkdownParser {
             match ch {
                 '#' => result.push(self.parse_header_or_text()),
                 '\n' => result.push(self.parse_new_line()),
-                _ => panic!("Unexpected token {}.", ch),
+                // Parse the rest of the characters as paragraphs
+                _ => result.push(self.parse_paragraph())
             }
         }
 
@@ -98,6 +99,12 @@ impl MarkdownParser {
         let text_tokens = self.parse_text_tokens();
 
         MarkdownToken::Header(header_level, text_tokens)
+    }
+
+    fn parse_paragraph(&mut self) -> MarkdownToken {
+        let text_tokens = self.parse_text_tokens();
+
+        MarkdownToken::Paragraph(text_tokens)
     }
 
     fn parse_text_tokens(&mut self) -> Vec<TextToken> {
@@ -404,6 +411,43 @@ mod tests {
                 vec![TextToken::Bold(vec![TextToken::Text(
                     "Hello World!".to_string()
                 )])]
+            )]
+        );
+    }
+
+    #[test]
+    fn parse_paragraph() {
+        let input = "Hello World";
+
+        let mut markdown_parser = MarkdownParser::new(input);
+        let result = markdown_parser.parse();
+
+        assert_eq!(
+            result,
+            vec![MarkdownToken::Paragraph(
+                vec![TextToken::Text("Hello World".to_string())]
+            )]
+        );
+    }
+
+    #[test]
+    fn parse_paragraph_with_style() {
+        let input = "Hello *World **123***!";
+
+        let mut markdown_parser = MarkdownParser::new(input);
+        let result = markdown_parser.parse();
+
+        assert_eq!(
+            result,
+            vec![MarkdownToken::Paragraph(
+                vec![
+                    TextToken::Text("Hello ".to_string()),
+                    TextToken::Italic(vec![
+                        TextToken::Text("World ".to_string()),
+                        TextToken::Bold(vec![TextToken::Text("123".to_string())])
+                    ]),
+                    TextToken::Text("!".to_string())
+                ]
             )]
         );
     }
