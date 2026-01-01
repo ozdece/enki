@@ -13,6 +13,7 @@ enum MarkdownToken {
     Header(HeaderLevel, Vec<TextToken>),
     NewLine,
     Paragraph(Vec<TextToken>),
+    HorizontalLine,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -54,6 +55,7 @@ impl MarkdownParser {
             match ch {
                 '#' => result.push(self.parse_header_or_text()),
                 '\n' => result.push(self.parse_new_line()),
+                '-' => result.push(self.horizontal_line_or_text()),
                 // Parse the rest of the characters as paragraphs
                 _ => result.push(self.parse_paragraph()),
             }
@@ -94,6 +96,21 @@ impl MarkdownParser {
         }
     }
 
+    fn horizontal_line_or_text(&mut self) -> MarkdownToken {
+        let mut offset = self.offset;
+
+        while offset < self.chars_len && self.chars[offset] == '-' {
+            offset += 1;
+        }
+
+        if self.chars[offset] == '\n' || offset == self.chars_len {
+            self.offset = offset;
+            MarkdownToken::HorizontalLine
+        } else {
+            self.parse_paragraph()
+        }
+    }
+
     fn parse_header(&mut self, header_level: HeaderLevel) -> MarkdownToken {
         let text_tokens = self.parse_text_tokens();
 
@@ -121,7 +138,7 @@ impl MarkdownParser {
             }
 
             let token = match ch {
-                '*' | '`' => self.get_styled_text_token(),
+                '*' | '`' | '_' => self.get_styled_text_token(),
                 '~' if self.is_strike_through_style() => self.get_styled_text_token(),
                 _ => self.parse_text(),
             };
@@ -170,7 +187,7 @@ impl MarkdownParser {
                 }
             } else {
                 match ch {
-                    '*' | '`' => tokens.push(self.get_styled_text_token()),
+                    '*' | '`' | '_' => tokens.push(self.get_styled_text_token()),
                     '~' if self.is_strike_through_style() => {
                         tokens.push(self.get_styled_text_token())
                     }
@@ -192,7 +209,7 @@ impl MarkdownParser {
         while self.offset < self.chars_len {
             let ch = self.chars[self.offset];
 
-            if ch == '`' || ch == '*' || self.is_strike_through_style() || ch == '\n' {
+            if ch == '`' || ch == '*' || ch == '_' || self.is_strike_through_style() || ch == '\n' {
                 break;
             }
 
@@ -212,6 +229,9 @@ impl MarkdownParser {
             "*" => TextToken::Italic(tokens),
             "**" => TextToken::Bold(tokens),
             "***" => TextToken::BoldItalic(tokens),
+            "_" => TextToken::Italic(tokens),
+            "__" => TextToken::Bold(tokens),
+            "___" => TextToken::BoldItalic(tokens),
             "`" | "``" | "```" => TextToken::Code(tokens),
             "~~" => TextToken::StrikeThrough(tokens),
             _ => self.parse_text(),
@@ -362,6 +382,33 @@ mod tests {
     #[test]
     fn parse_header_1_with_style_children_5() {
         let input = "# **Introduction to** ***Programming*** with `Rust *Programming Language*`";
+
+        let mut markdown_parser = MarkdownParser::new(input);
+        let result = markdown_parser.parse();
+
+        assert_eq!(
+            result,
+            vec![MarkdownToken::Header(
+                HeaderLevel::One,
+                vec![
+                    TextToken::Bold(vec![TextToken::Text("Introduction to".to_string())]),
+                    TextToken::Text(" ".to_string()),
+                    TextToken::BoldItalic(vec![TextToken::Text("Programming".to_string())]),
+                    TextToken::Text(" with ".to_string()),
+                    TextToken::Code(vec![
+                        TextToken::Text("Rust ".to_string()),
+                        TextToken::Italic(vec![TextToken::Text(
+                            "Programming Language".to_string()
+                        )])
+                    ]),
+                ]
+            )]
+        );
+    }
+
+    #[test]
+    fn parse_header_1_with_style_children_6_with_underscores() {
+        let input = "# __Introduction to__ ___Programming___ with `Rust _Programming Language_`";
 
         let mut markdown_parser = MarkdownParser::new(input);
         let result = markdown_parser.parse();
@@ -539,6 +586,25 @@ mod tests {
                 ]),
                 TextToken::Text("!".to_string())
             ])]
+        );
+    }
+
+    #[test]
+    fn parse_horizontal_line() {
+        let input = "Hello World\n---\nHello";
+
+        let mut markdown_parser = MarkdownParser::new(input);
+        let result = markdown_parser.parse();
+
+        assert_eq!(
+            result,
+            vec![
+                MarkdownToken::Paragraph(vec![TextToken::Text("Hello World".to_string())]),
+                MarkdownToken::NewLine,
+                MarkdownToken::HorizontalLine,
+                MarkdownToken::NewLine,
+                MarkdownToken::Paragraph(vec![TextToken::Text("Hello".to_string())])
+            ]
         );
     }
 }
