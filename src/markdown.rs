@@ -22,6 +22,7 @@ enum TextToken {
     Bold(Vec<TextToken>),
     BoldItalic(Vec<TextToken>),
     Code(Vec<TextToken>),
+    StrikeThrough(Vec<TextToken>),
 }
 
 struct MarkdownParser {
@@ -57,8 +58,6 @@ impl MarkdownParser {
                 _ => result.push(self.parse_paragraph()),
             }
         }
-
-        eprintln!("Stack: {:?}", self.stack);
 
         result
     }
@@ -123,6 +122,7 @@ impl MarkdownParser {
 
             let token = match ch {
                 '*' | '`' => self.get_styled_text_token(),
+                '~' if self.is_strike_through_style() => self.get_styled_text_token(),
                 _ => self.parse_text(),
             };
 
@@ -133,7 +133,7 @@ impl MarkdownParser {
     }
 
     fn get_styled_text_token(&mut self) -> TextToken {
-        //This special character will be either * or ` characters
+        //This special character will be either *, ~ or ` characters
         let spec_ch = self.chars[self.offset];
         let mut spec_characters = Vec::with_capacity(3);
         let mut ch_count = 0;
@@ -171,6 +171,9 @@ impl MarkdownParser {
             } else {
                 match ch {
                     '*' | '`' => tokens.push(self.get_styled_text_token()),
+                    '~' if self.is_strike_through_style() => {
+                        tokens.push(self.get_styled_text_token())
+                    }
                     _ => tokens.push(self.parse_text()),
                 }
             }
@@ -189,7 +192,7 @@ impl MarkdownParser {
         while self.offset < self.chars_len {
             let ch = self.chars[self.offset];
 
-            if ch == '`' || ch == '*' || ch == '\n' {
+            if ch == '`' || ch == '*' || self.is_strike_through_style() || ch == '\n' {
                 break;
             }
 
@@ -210,14 +213,14 @@ impl MarkdownParser {
             "**" => TextToken::Bold(tokens),
             "***" => TextToken::BoldItalic(tokens),
             "`" | "``" | "```" => TextToken::Code(tokens),
-            _ => panic!("Invalid Special Character \"{}\"", spec_ch_str),
+            "~~" => TextToken::StrikeThrough(tokens),
+            _ => self.parse_text(),
         }
     }
 
     fn is_styled_text_token_closure(&self) -> bool {
         let special_ch = self.chars[self.offset];
         let stack_str: String = self.stack.clone().into_iter().rev().collect();
-
         let mut offset = self.offset;
         let mut chs = Vec::with_capacity(3);
 
@@ -230,6 +233,12 @@ impl MarkdownParser {
         let read_chs: String = chs.into_iter().collect();
 
         self.stack.last().unwrap() == &read_chs || read_chs == stack_str
+    }
+
+    fn is_strike_through_style(&self) -> bool {
+        self.chars_len - self.offset > 1
+            && self.chars[self.offset] == '~'
+            && self.chars[self.offset + 1] == '~'
     }
 
     fn parse_new_line(&mut self) -> MarkdownToken {
@@ -442,6 +451,73 @@ mod tests {
             vec![MarkdownToken::Paragraph(vec![
                 TextToken::Text("Hello ".to_string()),
                 TextToken::Italic(vec![TextToken::Text("World".to_string())])
+            ])]
+        );
+    }
+
+    #[test]
+    fn parse_strike_through() {
+        let input = "~~Hello World~~";
+
+        let mut markdown_parser = MarkdownParser::new(input);
+        let result = markdown_parser.parse();
+
+        assert_eq!(
+            result,
+            vec![MarkdownToken::Paragraph(vec![TextToken::StrikeThrough(
+                vec![TextToken::Text("Hello World".to_string())]
+            )])]
+        );
+    }
+
+    #[test]
+    fn parse_paragraph_with_strikethrough_style() {
+        let input = "Hello *World ~~123~~*!";
+
+        let mut markdown_parser = MarkdownParser::new(input);
+        let result = markdown_parser.parse();
+
+        assert_eq!(
+            result,
+            vec![MarkdownToken::Paragraph(vec![
+                TextToken::Text("Hello ".to_string()),
+                TextToken::Italic(vec![
+                    TextToken::Text("World ".to_string()),
+                    TextToken::StrikeThrough(vec![TextToken::Text("123".to_string())])
+                ]),
+                TextToken::Text("!".to_string())
+            ])]
+        );
+    }
+
+    #[test]
+    fn do_not_parse_strike_through_with_single_character() {
+        let input = "~Hello World~";
+
+        let mut markdown_parser = MarkdownParser::new(input);
+        let result = markdown_parser.parse();
+
+        assert_eq!(
+            result,
+            vec![MarkdownToken::Paragraph(vec![TextToken::Text(
+                "~Hello World~".to_string()
+            )])]
+        );
+    }
+
+    #[test]
+    fn do_not_parse_paragraph_with_strikethrough_style() {
+        let input = "Hello *World ~123~*!";
+
+        let mut markdown_parser = MarkdownParser::new(input);
+        let result = markdown_parser.parse();
+
+        assert_eq!(
+            result,
+            vec![MarkdownToken::Paragraph(vec![
+                TextToken::Text("Hello ".to_string()),
+                TextToken::Italic(vec![TextToken::Text("World ~123~".to_string())]),
+                TextToken::Text("!".to_string())
             ])]
         );
     }
