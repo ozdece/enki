@@ -1,610 +1,235 @@
 #[derive(Debug, PartialEq, Eq)]
-enum HeaderLevel {
-    One,
-    Two,
-    Three,
-    Four,
-    Five,
-    Six,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum MarkdownToken {
-    Header(HeaderLevel, Vec<TextToken>),
-    NewLine,
-    Paragraph(Vec<TextToken>),
-    HorizontalLine,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum TextToken {
+enum ElementType {
+    Italic,
+    Bold,
     Text(String),
-    Italic(Vec<TextToken>),
-    Bold(Vec<TextToken>),
-    BoldItalic(Vec<TextToken>),
-    Code(Vec<TextToken>),
-    StrikeThrough(Vec<TextToken>),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct Element {
+    element_type: ElementType,
+    children: Vec<Element>,
+}
+
+impl Element {
+    
+    pub fn element_type(&self) -> &ElementType {
+        &self.element_type
+    }
+
+    pub fn append_child(&mut self, element: Element) {
+        self.children.push(element);
+    }
+
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum Markdown {
+    Paragraph(Element),
 }
 
 struct MarkdownParser {
-    offset: usize,
-    chars: Vec<char>,
     chars_len: usize,
-    stack: Vec<String>,
+    chars: Vec<char>,
+    offset: usize,
+    stack: Vec<Element>,
 }
 
 impl MarkdownParser {
     pub fn new(input: &str) -> Self {
-        let chars: Vec<char> = input.chars().collect();
+        let chars_len = input.len();
+        let chars: Vec<char> = input.chars().into_iter().collect();
 
         Self {
-            offset: 0,
-            chars_len: chars.len(),
+            chars_len,
             chars,
-            stack: Vec::with_capacity(5),
+            offset: 0,
+            stack: Vec::with_capacity(10),
         }
     }
 
-    pub fn parse(&mut self) -> Vec<MarkdownToken> {
-        let chars_len = self.chars.len();
-        let mut result = Vec::with_capacity(10);
+    pub fn parse(&mut self) -> Vec<Markdown> {
+        let element = self.parse_element();
 
-        while self.offset < chars_len {
-            let ch = self.chars[self.offset];
-
-            match ch {
-                '#' => result.push(self.parse_header_or_text()),
-                '\n' => result.push(self.parse_new_line()),
-                '-' => result.push(self.horizontal_line_or_text()),
-                // Parse the rest of the characters as paragraphs
-                _ => result.push(self.parse_paragraph()),
-            }
-        }
-
-        result
+        vec![Markdown::Paragraph(element)]
     }
 
-    fn parse_header_or_text(&mut self) -> MarkdownToken {
-        // Figure out the level of the header (should be between 1 and 6)
-        let mut header_ch_count = 0;
-        while self.offset < self.chars_len && self.chars[self.offset] == '#' {
-            header_ch_count += 1;
-            self.offset += 1;
-        }
-
+    fn parse_element(&mut self) -> Element {
         if self.offset == self.chars_len {
-            return MarkdownToken::Paragraph(vec![]);
+            return self.get_empty_string_element();
         }
 
-        let current_ch = self.chars[self.offset];
+        let ch = self.chars[self.offset];
 
-        if current_ch == ' ' {
-            self.offset += 1;
-
-            let header_level = match header_ch_count {
-                1 => HeaderLevel::One,
-                2 => HeaderLevel::Two,
-                3 => HeaderLevel::Three,
-                4 => HeaderLevel::Four,
-                5 => HeaderLevel::Five,
-                _ => HeaderLevel::Six,
-            };
-
-            self.parse_header(header_level)
-        } else {
-            todo!("Text parsing will be done later")
+        match ch {
+            '*' => self.parse_italic_or_bold(),
+            _ => self.parse_text()
         }
     }
 
-    fn horizontal_line_or_text(&mut self) -> MarkdownToken {
-        let mut offset = self.offset;
+    fn parse_italic_or_bold(&mut self) -> Element {
+        let styled_element_type = self.get_styled_element_type();
 
-        while offset < self.chars_len && self.chars[offset] == '-' {
-            offset += 1;
-        }
+        match styled_element_type {
+            Some(element_type) => {
+                if let Some(element) = self.stack.last() && element.element_type() == &element_type {
+                    return self.stack.pop().unwrap(); 
+                }
 
-        if self.chars[offset] == '\n' || offset == self.chars_len {
-            self.offset = offset;
-            MarkdownToken::HorizontalLine
-        } else {
-            self.parse_paragraph()
-        }
-    }
+                let new_element = Element {
+                    element_type: element_type,
+                    children: Vec::with_capacity(10)
+                };
 
-    fn parse_header(&mut self, header_level: HeaderLevel) -> MarkdownToken {
-        let text_tokens = self.parse_text_tokens();
+                self.stack.push(new_element);
 
-        MarkdownToken::Header(header_level, text_tokens)
-    }
+                return self.parse_italic_or_bold();
+            },
+            None => {
+                let mut chars = Vec::with_capacity(30);
 
-    fn parse_paragraph(&mut self) -> MarkdownToken {
-        let text_tokens = self.parse_text_tokens();
+                while self.offset < self.chars_len && self.chars[self.offset] != '*' && self.chars[self.offset] != '\n' {
+                    chars.push(self.chars[self.offset]);
+                    self.offset += 1;
+                }
 
-        MarkdownToken::Paragraph(text_tokens)
-    }
+                let string = chars.into_iter().collect();
+                let element_type = ElementType::Text(string);
 
-    fn parse_text_tokens(&mut self) -> Vec<TextToken> {
-        if self.offset == self.chars_len {
-            return vec![];
-        }
+                let element = Element {
+                    element_type: element_type,
+                    children: vec![]
+                };
 
-        let mut tokens = Vec::with_capacity(10);
-
-        while self.offset < self.chars_len {
-            let ch = self.chars[self.offset];
-
-            if ch == '\n' {
-                break;
-            }
-
-            let token = match ch {
-                '*' | '`' | '_' => self.get_styled_text_token(),
-                '~' if self.is_strike_through_style() => self.get_styled_text_token(),
-                _ => self.parse_text(),
-            };
-
-            tokens.push(token);
-        }
-
-        tokens
-    }
-
-    fn get_styled_text_token(&mut self) -> TextToken {
-        //This special character will be either *, ~ or ` characters
-        let spec_ch = self.chars[self.offset];
-        let mut spec_characters = Vec::with_capacity(3);
-        let mut ch_count = 0;
-
-        // Calculate how many special characters we have to identify the style
-        while self.offset < self.chars_len && ch_count < 3 && self.chars[self.offset] == spec_ch {
-            spec_characters.push(spec_ch);
-            self.offset += 1;
-            ch_count += 1;
-        }
-
-        if self.offset == self.chars_len {
-            return TextToken::Text("".to_string());
-        }
-
-        let spec_ch_str: String = spec_characters.into_iter().collect();
-
-        self.stack.push(spec_ch_str);
-
-        let mut tokens = Vec::with_capacity(10);
-
-        while self.offset < self.chars_len {
-            let ch = self.chars[self.offset];
-
-            if ch == spec_ch {
-                if let Some(last) = self.stack.last()
-                    && self.is_styled_text_token_closure()
-                {
-                    self.offset += last.len();
-                    return self.compact_text_token(tokens);
+                if let Some(stack_elem) = self.stack.last_mut() {
+                    stack_elem.children.push(element);
+                    return self.parse_italic_or_bold();
                 } else {
-                    let token = self.get_styled_text_token();
-                    tokens.push(token);
+                    self.stack.push(element);
+                    return self.parse_italic_or_bold();
                 }
-            } else {
-                match ch {
-                    '*' | '`' | '_' => tokens.push(self.get_styled_text_token()),
-                    '~' if self.is_strike_through_style() => {
-                        tokens.push(self.get_styled_text_token())
-                    }
-                    _ => tokens.push(self.parse_text()),
-                }
-            }
-        }
-
-        if let Some(_) = self.stack.last() {
-            self.compact_text_token(tokens)
-        } else {
-            return TextToken::Text("".to_string());
+            },
         }
     }
 
-    fn parse_text(&mut self) -> TextToken {
-        let mut text_chs = Vec::with_capacity(100);
+    fn get_styled_element_type(&mut self) -> Option<ElementType> {
+        let ch = self.chars[self.offset];
 
-        while self.offset < self.chars_len {
-            let ch = self.chars[self.offset];
-
-            if ch == '`' || ch == '*' || ch == '_' || self.is_strike_through_style() || ch == '\n' {
-                break;
+        match ch {
+            '*' => {
+                if self.offset + 1 < self.chars_len && self.chars[self.offset + 1] == '*' {
+                    self.offset += 2;
+                    Some(ElementType::Bold)
+                } else {
+                    self.offset += 1;
+                    Some(ElementType::Italic)
+                }
             }
+            _ => None
+        }
+    }
 
-            text_chs.push(ch);
+    fn parse_text(&mut self) -> Element {
+        let mut chars = Vec::with_capacity(30);
+
+        //TODO: Check if character is a special character like *, **,_ etc.
+        while self.offset < self.chars_len && self.chars[self.offset] != '\n' {
+            chars.push(self.chars[self.offset]);
             self.offset += 1;
         }
 
-        let text_token_str: String = text_chs.into_iter().collect();
+        let string = chars.into_iter().collect();
+        let element_type = ElementType::Text(string);
 
-        TextToken::Text(text_token_str)
-    }
-
-    fn compact_text_token(&mut self, tokens: Vec<TextToken>) -> TextToken {
-        let spec_ch_str = self.stack.pop().unwrap();
-
-        match spec_ch_str.as_str() {
-            "*" => TextToken::Italic(tokens),
-            "**" => TextToken::Bold(tokens),
-            "***" => TextToken::BoldItalic(tokens),
-            "_" => TextToken::Italic(tokens),
-            "__" => TextToken::Bold(tokens),
-            "___" => TextToken::BoldItalic(tokens),
-            "`" | "``" | "```" => TextToken::Code(tokens),
-            "~~" => TextToken::StrikeThrough(tokens),
-            _ => self.parse_text(),
+        Element {
+            element_type: element_type,
+            children: vec![],
         }
     }
 
-    fn is_styled_text_token_closure(&self) -> bool {
-        let special_ch = self.chars[self.offset];
-        let stack_str: String = self.stack.clone().into_iter().rev().collect();
-        let mut offset = self.offset;
-        let mut chs = Vec::with_capacity(3);
-
-        while offset < self.chars_len && self.chars[offset] == special_ch {
-            chs.push(self.chars[offset]);
-
-            offset += 1;
+    #[inline]
+    fn get_empty_string_element(&self) -> Element {
+        Element {
+            element_type: ElementType::Text(String::from("")),
+            children: vec![]
         }
-
-        let read_chs: String = chs.into_iter().collect();
-
-        self.stack.last().unwrap() == &read_chs || read_chs == stack_str
-    }
-
-    fn is_strike_through_style(&self) -> bool {
-        self.chars_len - self.offset > 1
-            && self.chars[self.offset] == '~'
-            && self.chars[self.offset + 1] == '~'
-    }
-
-    fn parse_new_line(&mut self) -> MarkdownToken {
-        self.offset += 1;
-
-        MarkdownToken::NewLine
     }
 }
 
 #[cfg(test)]
 mod tests {
-
     use super::*;
 
     #[test]
-    fn parse_header_1() {
-        let input = "# Hello World!";
+    fn parse_simple_text() {
+        let text = "Hello World!";
+        let mut markdown_parser = MarkdownParser::new(text);
 
-        let mut markdown_parser = MarkdownParser::new(input);
         let result = markdown_parser.parse();
 
         assert_eq!(
             result,
-            vec![MarkdownToken::Header(
-                HeaderLevel::One,
-                vec![TextToken::Text("Hello World!".to_string())]
-            )]
-        );
+            vec![Markdown::Paragraph(Element {
+                element_type: ElementType::Text(String::from("Hello World!")),
+                children: vec![]
+            })]
+        )
     }
 
     #[test]
-    fn parse_header_1_with_style_children() {
-        let input = "# Hello *World*!";
+    fn parse_italic_text() {
+        let text = "*Hello World!*";
+        let mut markdown_parser = MarkdownParser::new(text);
 
-        let mut markdown_parser = MarkdownParser::new(input);
         let result = markdown_parser.parse();
 
         assert_eq!(
             result,
-            vec![MarkdownToken::Header(
-                HeaderLevel::One,
-                vec![
-                    TextToken::Text("Hello ".to_string()),
-                    TextToken::Italic(vec![TextToken::Text("World".to_string())]),
-                    TextToken::Text("!".to_string())
-                ]
-            )]
-        );
+            vec![Markdown::Paragraph(Element {
+                element_type: ElementType::Italic,
+                children: vec![Element {
+                    element_type: ElementType::Text(String::from("Hello World!")),
+                    children: vec![]
+                }]
+            })]
+        )
     }
 
     #[test]
-    fn parse_header_1_with_style_children_2() {
-        let input = "# Hello *World **123***!";
+    fn parse_bold_text() {
+        let text = "**Hello World!**";
+        let mut markdown_parser = MarkdownParser::new(text);
 
-        let mut markdown_parser = MarkdownParser::new(input);
         let result = markdown_parser.parse();
 
         assert_eq!(
             result,
-            vec![MarkdownToken::Header(
-                HeaderLevel::One,
-                vec![
-                    TextToken::Text("Hello ".to_string()),
-                    TextToken::Italic(vec![
-                        TextToken::Text("World ".to_string()),
-                        TextToken::Bold(vec![TextToken::Text("123".to_string())])
-                    ]),
-                    TextToken::Text("!".to_string())
-                ]
-            )]
-        );
+            vec![Markdown::Paragraph(Element {
+                element_type: ElementType::Bold,
+                children: vec![Element {
+                    element_type: ElementType::Text(String::from("Hello World!")),
+                    children: vec![]
+                }]
+            })]
+        )
     }
 
     #[test]
-    fn parse_header_1_with_style_children_3() {
-        let input = "# Hello *World **123** `i am a code`*!";
+    fn parse_bold_italic_text() {
+        let text = "***Hello World!***";
+        let mut markdown_parser = MarkdownParser::new(text);
 
-        let mut markdown_parser = MarkdownParser::new(input);
         let result = markdown_parser.parse();
 
         assert_eq!(
             result,
-            vec![MarkdownToken::Header(
-                HeaderLevel::One,
-                vec![
-                    TextToken::Text("Hello ".to_string()),
-                    TextToken::Italic(vec![
-                        TextToken::Text("World ".to_string()),
-                        TextToken::Bold(vec![TextToken::Text("123".to_string())]),
-                        TextToken::Text(" ".to_string()),
-                        TextToken::Code(vec![TextToken::Text("i am a code".to_string())])
-                    ]),
-                    TextToken::Text("!".to_string())
-                ]
-            )]
-        );
-    }
-
-    #[test]
-    fn parse_header_1_with_style_children_4() {
-        let input = "# **Introduction to** ***Programming*** with `Rust`";
-
-        let mut markdown_parser = MarkdownParser::new(input);
-        let result = markdown_parser.parse();
-
-        assert_eq!(
-            result,
-            vec![MarkdownToken::Header(
-                HeaderLevel::One,
-                vec![
-                    TextToken::Bold(vec![TextToken::Text("Introduction to".to_string())]),
-                    TextToken::Text(" ".to_string()),
-                    TextToken::BoldItalic(vec![TextToken::Text("Programming".to_string())]),
-                    TextToken::Text(" with ".to_string()),
-                    TextToken::Code(vec![TextToken::Text("Rust".to_string())]),
-                ]
-            )]
-        );
-    }
-
-    #[test]
-    fn parse_header_1_with_style_children_5() {
-        let input = "# **Introduction to** ***Programming*** with `Rust *Programming Language*`";
-
-        let mut markdown_parser = MarkdownParser::new(input);
-        let result = markdown_parser.parse();
-
-        assert_eq!(
-            result,
-            vec![MarkdownToken::Header(
-                HeaderLevel::One,
-                vec![
-                    TextToken::Bold(vec![TextToken::Text("Introduction to".to_string())]),
-                    TextToken::Text(" ".to_string()),
-                    TextToken::BoldItalic(vec![TextToken::Text("Programming".to_string())]),
-                    TextToken::Text(" with ".to_string()),
-                    TextToken::Code(vec![
-                        TextToken::Text("Rust ".to_string()),
-                        TextToken::Italic(vec![TextToken::Text(
-                            "Programming Language".to_string()
-                        )])
-                    ]),
-                ]
-            )]
-        );
-    }
-
-    #[test]
-    fn parse_header_1_with_style_children_6_with_underscores() {
-        let input = "# __Introduction to__ ___Programming___ with `Rust _Programming Language_`";
-
-        let mut markdown_parser = MarkdownParser::new(input);
-        let result = markdown_parser.parse();
-
-        assert_eq!(
-            result,
-            vec![MarkdownToken::Header(
-                HeaderLevel::One,
-                vec![
-                    TextToken::Bold(vec![TextToken::Text("Introduction to".to_string())]),
-                    TextToken::Text(" ".to_string()),
-                    TextToken::BoldItalic(vec![TextToken::Text("Programming".to_string())]),
-                    TextToken::Text(" with ".to_string()),
-                    TextToken::Code(vec![
-                        TextToken::Text("Rust ".to_string()),
-                        TextToken::Italic(vec![TextToken::Text(
-                            "Programming Language".to_string()
-                        )])
-                    ]),
-                ]
-            )]
-        );
-    }
-
-    #[test]
-    fn parse_header_1_with_newline() {
-        let input = "# Hello World!\n\n";
-
-        let mut markdown_parser = MarkdownParser::new(input);
-        let result = markdown_parser.parse();
-
-        assert_eq!(
-            result,
-            vec![
-                MarkdownToken::Header(
-                    HeaderLevel::One,
-                    vec![TextToken::Text("Hello World!".to_string())]
-                ),
-                MarkdownToken::NewLine,
-                MarkdownToken::NewLine
-            ]
-        );
-    }
-
-    #[test]
-    fn parse_header_2() {
-        let input = "## **Hello World!**";
-
-        let mut markdown_parser = MarkdownParser::new(input);
-        let result = markdown_parser.parse();
-
-        assert_eq!(
-            result,
-            vec![MarkdownToken::Header(
-                HeaderLevel::Two,
-                vec![TextToken::Bold(vec![TextToken::Text(
-                    "Hello World!".to_string()
-                )])]
-            )]
-        );
-    }
-
-    #[test]
-    fn parse_paragraph() {
-        let input = "Hello World";
-
-        let mut markdown_parser = MarkdownParser::new(input);
-        let result = markdown_parser.parse();
-
-        assert_eq!(
-            result,
-            vec![MarkdownToken::Paragraph(vec![TextToken::Text(
-                "Hello World".to_string()
-            )])]
-        );
-    }
-
-    #[test]
-    fn parse_unclosed_styled_paragraph() {
-        let input = "Hello *World";
-
-        let mut markdown_parser = MarkdownParser::new(input);
-        let result = markdown_parser.parse();
-
-        assert_eq!(
-            result,
-            vec![MarkdownToken::Paragraph(vec![
-                TextToken::Text("Hello ".to_string()),
-                TextToken::Italic(vec![TextToken::Text("World".to_string())])
-            ])]
-        );
-    }
-
-    #[test]
-    fn parse_strike_through() {
-        let input = "~~Hello World~~";
-
-        let mut markdown_parser = MarkdownParser::new(input);
-        let result = markdown_parser.parse();
-
-        assert_eq!(
-            result,
-            vec![MarkdownToken::Paragraph(vec![TextToken::StrikeThrough(
-                vec![TextToken::Text("Hello World".to_string())]
-            )])]
-        );
-    }
-
-    #[test]
-    fn parse_paragraph_with_strikethrough_style() {
-        let input = "Hello *World ~~123~~*!";
-
-        let mut markdown_parser = MarkdownParser::new(input);
-        let result = markdown_parser.parse();
-
-        assert_eq!(
-            result,
-            vec![MarkdownToken::Paragraph(vec![
-                TextToken::Text("Hello ".to_string()),
-                TextToken::Italic(vec![
-                    TextToken::Text("World ".to_string()),
-                    TextToken::StrikeThrough(vec![TextToken::Text("123".to_string())])
-                ]),
-                TextToken::Text("!".to_string())
-            ])]
-        );
-    }
-
-    #[test]
-    fn do_not_parse_strike_through_with_single_character() {
-        let input = "~Hello World~";
-
-        let mut markdown_parser = MarkdownParser::new(input);
-        let result = markdown_parser.parse();
-
-        assert_eq!(
-            result,
-            vec![MarkdownToken::Paragraph(vec![TextToken::Text(
-                "~Hello World~".to_string()
-            )])]
-        );
-    }
-
-    #[test]
-    fn do_not_parse_paragraph_with_strikethrough_style() {
-        let input = "Hello *World ~123~*!";
-
-        let mut markdown_parser = MarkdownParser::new(input);
-        let result = markdown_parser.parse();
-
-        assert_eq!(
-            result,
-            vec![MarkdownToken::Paragraph(vec![
-                TextToken::Text("Hello ".to_string()),
-                TextToken::Italic(vec![TextToken::Text("World ~123~".to_string())]),
-                TextToken::Text("!".to_string())
-            ])]
-        );
-    }
-
-    #[test]
-    fn parse_paragraph_with_style() {
-        let input = "Hello *World **123***!";
-
-        let mut markdown_parser = MarkdownParser::new(input);
-        let result = markdown_parser.parse();
-
-        assert_eq!(
-            result,
-            vec![MarkdownToken::Paragraph(vec![
-                TextToken::Text("Hello ".to_string()),
-                TextToken::Italic(vec![
-                    TextToken::Text("World ".to_string()),
-                    TextToken::Bold(vec![TextToken::Text("123".to_string())])
-                ]),
-                TextToken::Text("!".to_string())
-            ])]
-        );
-    }
-
-    #[test]
-    fn parse_horizontal_line() {
-        let input = "Hello World\n---\nHello";
-
-        let mut markdown_parser = MarkdownParser::new(input);
-        let result = markdown_parser.parse();
-
-        assert_eq!(
-            result,
-            vec![
-                MarkdownToken::Paragraph(vec![TextToken::Text("Hello World".to_string())]),
-                MarkdownToken::NewLine,
-                MarkdownToken::HorizontalLine,
-                MarkdownToken::NewLine,
-                MarkdownToken::Paragraph(vec![TextToken::Text("Hello".to_string())])
-            ]
-        );
+            vec![Markdown::Paragraph(Element {
+                element_type: ElementType::Bold,
+                children: vec![Element {
+                    element_type: ElementType::Text(String::from("Hello World!")),
+                    children: vec![]
+                }]
+            })]
+        )
     }
 }
